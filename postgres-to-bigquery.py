@@ -27,24 +27,41 @@ GCS_BUCKET_NAME=Variable.get("gcs_bucket")
 BQ_PROJECT=Variable.get("bq_project")
 SLACK_CHANNEL=Variable.get("slack_notif_channel")
 
-DATA_SOURCE=["data.subscriptions", "data.subscription_quotations"]
+DATA_SOURCE=["data.subscriptions", "data.subscription_groups", "data.subscription_quotations"]
 
-for table in DATA_SOURCE:
-    with DAG(
-        f'{SERVICE_NAME}-to-bigquery',
-        default_args=args,
-        description='Postgres to BigQuery',
-        catchup=False,
-        tags=['data-engineering'],
-        start_date=datetime(2022, 9, 8),
-    ) as dag:
+with DAG(
+    f'{SERVICE_NAME}-to-bigquery',
+    default_args=args,
+    description='Postgres to BigQuery',
+    catchup=False,
+    tags=['data-engineering'],
+    start_date=datetime(2022, 9, 8),
+) as dag:
+
+    notify_success_task = SlackWebhookOperator(
+        task_id="notif-success",
+        trigger_rule=TriggerRule.ALL_SUCCESS,
+        message=f"airflow {SERVICE_NAME}-to-bigquery success",
+        channel=SLACK_CHANNEL,
+        http_conn_id='slack_connection'
+    )
+
+    notify_fails_task = SlackWebhookOperator(
+        task_id="notif-fails",
+        trigger_rule=TriggerRule.ONE_FAILED,
+        message=f"airflow {SERVICE_NAME}-to-bigquery failed",
+        channel=SLACK_CHANNEL,
+        http_conn_id='slack_connection'
+    )
+
+    for table in DATA_SOURCE:
         [POSTGRES_SCHEMA_NAME, POSTGRES_TABLE_NAME] = table.split(".")
 
         FILENAME=f'{SERVICE_NAME}/{POSTGRES_TABLE_NAME}.{FILE_FORMAT}'
         BQ_DESTINATION='.'.join([BQ_PROJECT, SERVICE_NAME, POSTGRES_TABLE_NAME])
 
         postgres_to_gcs_task = PostgresToGCSOperator(
-            task_id='pg-to-gcs',
+            task_id=f'{POSTGRES_TABLE_NAME}-pg-to-gcs',
             postgres_conn_id=POSTGRES_CONNECTION_ID,
             sql=f'SELECT * FROM {POSTGRES_SCHEMA_NAME}.{POSTGRES_TABLE_NAME};',
             bucket=GCS_BUCKET_NAME,
@@ -55,7 +72,7 @@ for table in DATA_SOURCE:
         )
 
         gcs_to_bq_task = GCSToBigQueryOperator(
-            task_id=f'gcs-to-bq',
+            task_id=f'{POSTGRES_TABLE_NAME}-gcs-to-bq',
             bucket=GCS_BUCKET_NAME,
             source_objects=[FILENAME],
             destination_project_dataset_table=BQ_DESTINATION,
@@ -66,26 +83,10 @@ for table in DATA_SOURCE:
         )
 
         cleanup_task = GCSDeleteObjectsOperator(
-            task_id='gcs-cleanup',
+            task_id=f'{POSTGRES_TABLE_NAME}-gcs-cleanup',
             trigger_rule=TriggerRule.ALL_DONE,
             bucket_name=GCS_BUCKET_NAME,
             objects=[FILENAME],
-        )
-
-        notify_success_task = SlackWebhookOperator(
-            task_id="notif-success",
-            trigger_rule=TriggerRule.ALL_SUCCESS,
-            message=f"airflow {SERVICE_NAME}-to-bigquery success",
-            channel=SLACK_CHANNEL,
-            http_conn_id='slack_connection'
-        )
-
-        notify_fails_task = SlackWebhookOperator(
-            task_id="notif-fails",
-            trigger_rule=TriggerRule.ONE_FAILED,
-            message=f"airflow {SERVICE_NAME}-to-bigquery failed",
-            channel=SLACK_CHANNEL,
-            http_conn_id='slack_connection'
         )
 
         postgres_to_gcs_task >> gcs_to_bq_task >> cleanup_task >> [notify_success_task, notify_fails_task]
