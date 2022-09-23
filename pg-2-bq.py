@@ -30,6 +30,7 @@ SLACK_CHANNEL=Variable.get("slack_notif_channel")
 
 POSTGRES_SCHEMA_NAME="data"
 POSTGRES_TABLE_NAME="subscriptions"
+POSTGRES_COLUMNS=["id", "created_at"]
 
 with DAG(
     'pg-2-bq',
@@ -42,17 +43,17 @@ with DAG(
 
     FILENAME=f'{SERVICE_NAME}/{POSTGRES_TABLE_NAME}.{FILE_FORMAT}'
     BQ_DESTINATION='.'.join([BQ_PROJECT, SERVICE_NAME, POSTGRES_TABLE_NAME])
+    PG_COLUMN="*" if not POSTGRES_COLUMNS else ", ".join(POSTGRES_COLUMNS)
 
     postgres_to_gcs_task = CustomPostgresToGCSOperator(
         task_id='pg-to-gcs',
         postgres_conn_id=POSTGRES_CONNECTION_ID,
-        sql=f'SELECT * FROM {POSTGRES_SCHEMA_NAME}.{POSTGRES_TABLE_NAME};',
+        sql=f'SELECT {PG_COLUMN} FROM {POSTGRES_SCHEMA_NAME}.{POSTGRES_TABLE_NAME};',
         bucket=GCS_BUCKET_NAME,
         filename=FILENAME,
         export_format=FILE_FORMAT,
         gzip=False,
-        use_server_side_cursor=False,
-        exclude_columns=["snapshot"]
+        use_server_side_cursor=False
     )
 
     gcs_to_bq_task = GCSToBigQueryOperator(
