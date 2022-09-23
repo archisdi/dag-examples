@@ -52,6 +52,7 @@ with DAG(
         export_format=FILE_FORMAT,
         gzip=False,
         use_server_side_cursor=False,
+        exclude_columns=["snapshot"]
     )
 
     gcs_to_bq_task = GCSToBigQueryOperator(
