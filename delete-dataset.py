@@ -11,6 +11,7 @@ with DAG(
     catchup=False,
     tags=['data-engineering'],
     start_date=datetime(2022, 9, 8),
+    schedule=None
 ):
     deleteDataSet = BigQueryDeleteDatasetOperator(
         task_id="rm-bq-ds",
